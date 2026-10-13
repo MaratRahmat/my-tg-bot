@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Органайзер</title>
+  <!-- Скрипт Telegram WebApp -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #18222d);
+      --card-bg: var(--tg-theme-secondary-bg-color, #232e3c);
+      --text: var(--tg-theme-text-color, #ffffff);
+      --hint: var(--tg-theme-hint-color, #708499);
+      --accent: var(--tg-theme-button-color, #2ea6ff);
+      --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 16px; padding-bottom: 80px; }
+
+    /* Переключатель вкладок */
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; background: var(--card-bg); padding: 4px; border-radius: 12px; }
+    .tab-btn { flex: 1; padding: 10px; border: none; background: transparent; color: var(--hint); font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+    .tab-btn.active { background: var(--accent); color: var(--accent-text); }
+
+    .content-tab { display: none; }
+    .content-tab.active { display: block; }
+
+    /* Плитки типов (Доход / Расход) */
+    .type-switch { display: flex; gap: 10px; margin-bottom: 16px; }
+    .type-btn { flex: 1; padding: 12px; border: 2px solid var(--card-bg); background: var(--card-bg); color: var(--text); border-radius: 12px; font-weight: 600; cursor: pointer; text-align: center; }
+    .type-btn.active { border-color: var(--accent); }
+
+    /* Сетка категорий */
+    .categories-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+    .cat-card { background: var(--card-bg); border: 2px solid transparent; border-radius: 12px; padding: 12px 6px; text-align: center; cursor: pointer; transition: 0.15s; font-size: 13px; }
+    .cat-card .icon { font-size: 24px; display: block; margin-bottom: 4px; }
+    .cat-card.selected { border-color: var(--accent); background: rgba(46, 166, 255, 0.15); }
+
+    /* Поля ввода */
+    .input-group { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 6px; }
+    input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--card-bg); background: var(--card-bg); color: var(--text); font-size: 16px; outline: none; }
+    input:focus { border-color: var(--accent); }
+
+    /* Главная кнопка */
+    .action-btn { width: 100%; padding: 16px; border: none; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <!-- Навигация -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('finance')">💰 Финансы</button>
+    <button class="tab-btn" onclick="switchTab('deadlines')">⏳ Дедлайн</button>
+  </div>
+
+  <!-- ВКЛАДКА 1: ФИНАНСЫ -->
+  <div id="tab-finance" class="content-tab active">
+    <div class="type-switch">
+      <div class="type-btn active" id="btn-exp" onclick="setType('expense')">Расход 🔴</div>
+      <div class="type-btn" id="btn-inc" onclick="setType('income')">Доход 🟢</div>
+    </div>
+
+    <label>Выбери категорию:</label>
+    <div class="categories-grid" id="cat-grid">
+      <!-- Категории генерятся скриптом -->
+    </div>
+
+    <div class="input-group">
+      <label>Сумма (₽):</label>
+      <input type="number" id="fin-amount" placeholder="0" inputmode="decimal">
+    </div>
+
+    <div class="input-group">
+      <label>Комментарий (необязательно):</label>
+      <input type="text" id="fin-comment" placeholder="Например: Пятерочка или Верстка">
+    </div>
+
+    <button class="action-btn" onclick="sendFinance()">Сохранить операцию</button>
+  </div>
+
+  <!-- ВКЛАДКА 2: ДЕДЛАЙНЫ -->
+  <div id="tab-deadlines" class="content-tab">
+    <div class="input-group">
+      <label>Что нужно сделать:</label>
+      <input type="text" id="task-title" placeholder="Сдать отчет по базам данных">
+    </div>
+
+    <div class="input-group">
+      <label>Дедлайн (дата):</label>
+      <input type="date" id="task-date">
+    </div>
+
+    <button class="action-btn" onclick="sendDeadline()">Добавить дедлайн</button>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand(); // Разворачиваем окно на весь экран
+
+    let currentType = 'expense';
+    let selectedCat = 'Продукты';
+
+    const expenseCats = [
+      { id: 'Продукты', icon: '🛒' },
+      { id: 'Коммуналка', icon: '💡' },
+      { id: 'Интернет', icon: '🌐' },
+      { id: 'Кафе/Еда', icon: '🍔' },
+      { id: 'Транспорт', icon: '🚗' },
+      { id: 'Другое', icon: '📦' }
+    ];
+
+    const incomeCats = [
+      { id: 'Работа/Клиент', icon: '💼' },
+      { id: 'Сайт/Проект', icon: '💻' },
+      { id: 'Другое', icon: '💰' }
+    ];
+
+    function renderCategories() {
+      const grid = document.getElementById('cat-grid');
+      grid.innerHTML = '';
+      const list = currentType === 'expense' ? expenseCats : incomeCats;
+      selectedCat = list[0].id;
+
+      list.forEach((c, index) => {
+        const div = document.createElement('div');
+        div.className = `cat-card ${index === 0 ? 'selected' : ''}`;
+        div.innerHTML = `<span class="icon">${c.icon}</span><span>${c.id}</span>`;
+        div.onclick = () => {
+          document.querySelectorAll('.cat-card').forEach(el => el.classList.remove('selected'));
+          div.classList.add('selected');
+          selectedCat = c.id;
+        };
+        grid.appendChild(div);
+      });
+    }
+
+    function setType(type) {
+      currentType = type;
+      document.getElementById('btn-exp').classList.toggle('active', type === 'expense');
+      document.getElementById('btn-inc').classList.toggle('active', type === 'income');
+      renderCategories();
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.content-tab').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById(`tab-${name}`).classList.add('active');
+    }
+
+    function sendFinance() {
+      const amount = document.getElementById('fin-amount').value;
+      const comment = document.getElementById('fin-comment').value;
+
+      if (!amount || amount <= 0) {
+        tg.showAlert('Пожалуйста, введи сумму!');
+        return;
+      }
+
+      const payload = {
+        action: 'finance',
+        type: currentType,
+        category: selectedCat,
+        amount: parseFloat(amount),
+        comment: comment
+      };
+
+      tg.sendData(JSON.stringify(payload)); // Отправляет данные обратно в Python!
+    }
+
+    function sendDeadline() {
+      const title = document.getElementById('task-title').value;
+      const date = document.getElementById('task-date').value;
+
+      if (!title || !date) {
+        tg.showAlert('Заполни название и дату!');
+        return;
+      }
+
+      const payload = {
+        action: 'deadline',
+        task: title,
+        date: date
+      };
+
+      tg.sendData(JSON.stringify(payload));
+    }
+
+    renderCategories();
+  </script>
+</body>
+</html>
